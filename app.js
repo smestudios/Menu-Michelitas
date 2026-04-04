@@ -1,23 +1,3 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  getFirestore,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-} from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
-
-/**
- * IMPORTANTE:
- * 1) Copia este archivo a firebase-config.js.
- * 2) Pega SOLO la configuración pública del cliente web (apiKey, projectId, etc).
- * 3) NO pegues credenciales de service_account en frontend.
- */
 const firebaseConfig = window.__FIREBASE_CONFIG__;
 
 const state = {
@@ -37,9 +17,24 @@ const sectionTemplate = document.querySelector("#section-template");
 const productTemplate = document.querySelector("#product-template");
 
 let db;
+let addDoc;
+let collection;
+let deleteDoc;
+let doc;
+let getDocs;
+let getFirestore;
+let initializeApp;
+let onSnapshot;
+let orderBy;
+let query;
+let serverTimestamp;
 
 function byOrder(a, b) {
   return (a.order ?? 9999) - (b.order ?? 9999);
+}
+
+function nowStamp() {
+  return new Date().toISOString();
 }
 
 function ensureFallbackData() {
@@ -144,11 +139,17 @@ function renderAdminProducts() {
 }
 
 async function addSection(name) {
-  const payload = { name, order: state.sections.length, createdAt: serverTimestamp() };
+  const payload = {
+    name,
+    order: state.sections.length,
+    createdAt: state.firestoreReady ? serverTimestamp() : nowStamp(),
+  };
+
   if (state.firestoreReady) {
     await addDoc(collection(db, "sections"), payload);
     return;
   }
+
   state.sections.push({ id: crypto.randomUUID(), ...payload });
   persistLocal();
   renderAll();
@@ -161,6 +162,7 @@ async function removeSection(id) {
     await Promise.all(attached.map((p) => deleteDoc(doc(db, "products", p.id))));
     return;
   }
+
   state.sections = state.sections.filter((s) => s.id !== id);
   state.products = state.products.filter((p) => p.sectionId !== id);
   persistLocal();
@@ -174,7 +176,7 @@ async function addProduct(form) {
     description: form.description,
     price: form.price,
     order: state.products.filter((p) => p.sectionId === form.sectionId).length,
-    createdAt: serverTimestamp(),
+    createdAt: state.firestoreReady ? serverTimestamp() : nowStamp(),
   };
 
   if (state.firestoreReady) {
@@ -192,6 +194,7 @@ async function removeProduct(id) {
     await deleteDoc(doc(db, "products", id));
     return;
   }
+
   state.products = state.products.filter((p) => p.id !== id);
   persistLocal();
   renderAll();
@@ -227,6 +230,7 @@ function bindForms() {
       description: document.querySelector("#product-description").value.trim(),
       price: document.querySelector("#product-price").value.trim(),
     };
+
     if (!form.sectionId || !form.name) return;
     await addProduct(form);
     productForm.reset();
@@ -255,14 +259,33 @@ function listenFirestore() {
   });
 }
 
+async function loadFirebaseSdk() {
+  const [{ initializeApp: initApp }, firestore] = await Promise.all([
+    import("https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js"),
+    import("https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js"),
+  ]);
+
+  initializeApp = initApp;
+  addDoc = firestore.addDoc;
+  collection = firestore.collection;
+  deleteDoc = firestore.deleteDoc;
+  doc = firestore.doc;
+  getDocs = firestore.getDocs;
+  getFirestore = firestore.getFirestore;
+  onSnapshot = firestore.onSnapshot;
+  orderBy = firestore.orderBy;
+  query = firestore.query;
+  serverTimestamp = firestore.serverTimestamp;
+}
+
 async function initFirebase() {
   if (!firebaseConfig) {
     renderConfigError("Firebase no configurado. Funciona en modo local (localStorage).");
-    loadLocal();
     return;
   }
 
   try {
+    await loadFirebaseSdk();
     const app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     await getDocs(query(collection(db, "sections")));
@@ -270,11 +293,11 @@ async function initFirebase() {
     listenFirestore();
   } catch (error) {
     console.error(error);
-    renderConfigError("No se pudo conectar a Firebase. Se usará modo local.");
-    loadLocal();
+    renderConfigError("No se pudo conectar a Firebase. Se mantiene modo local.");
   }
 }
 
 setupHotkey();
 bindForms();
+loadLocal();
 initFirebase();
